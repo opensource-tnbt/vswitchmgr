@@ -1,0 +1,9 @@
+export VHOST_USER
+include mk/master.mk
+SUBDIRS =
+SUBDIRS += dpdk
+SUBDIRS += ovs
+ovs: dpdk
+WITH_LINUX =
+VHOST_USER = y
+include mk/make-subsys.mk

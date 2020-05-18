@@ -1,0 +1,7 @@
+export VHOST_USER
+include mk/master.mk
+SUBDIRS =
+SUBDIRS += vpp
+WITH_LINUX =
+VHOST_USER = n
+include mk/make-subsys.mk

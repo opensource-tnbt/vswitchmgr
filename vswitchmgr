@@ -1,0 +1,95 @@
+#!/bin/bash
+
+
+# function to emit error message before quitting
+function die() {
+    echo $1
+    exit 1
+}
+
+ROOT_UID=0
+SUDO=""
+OVSPATH = "src/ovs/ovs"
+UTILS = "$OVS_PATH/utilities"
+DB = "$OVS_PATH/ovsdb"
+ETC = "/usr/local/etc/openvswitch"
+SWITCHD = "$OVS_PATH/vswitchd"
+VSWITCH = "/usr/local/var/run/openswitch"
+pci0 = '0000:00:2.0'
+pci1 = '0000:00:2.1'
+
+# check if root
+if [ "$UID" -ne "$ROOT_UID" ]
+then
+    # installation must be run via sudo
+    SUDO="sudo -E"
+fi
+
+if [ -f ./src/Makefile ] ; then
+    cd ./src
+    make || die "Make failed"
+    cd -
+else
+    die "Make failed; No Makefile"
+fi
+
+# Get interfaces
+IFACES=$(ls /sys/class/net | grep -E '^em|^eno|^eth|^p2' | tr '\n' ' ')
+
+# See what links are up
+for i in $IFACES
+  do
+    ethtool $i | grep -q "Link detected: yes"
+  if [ $? -eq 0 ]; then
+     IFACEUP="$IFACEUP $i" 
+  fi
+done
+ 
+echo "Interfaces that have their links UP: $IFACEUP"
+
+# Prepare System for DPDK.
+
+SUDO insmod ./src/dpdk/dpdk/x86_64-native-linuxapp-gcc/kmod/igb_uio.ko
+SUDO ./src/dpdk/dpdk/usertools/dpdk-devbind.py --bind=igb_uio $pci0 $pci1
+
+# Setup Paths
+if [ -d /usr/local/var/run/openvswitch ] ; then
+    SUDO mv /usr/local/var/run/openvswitch /usr/local/var/run/openvswitch.tmp
+    SUDO mkdir -p /usr/local/var/run/openvswitch
+fi
+
+if [ -d /usr/local/etc/openvswitch ] ; then
+    SUDO mv /usr/local/etc/openvswitch /usr/local/etc/openvswitch.tmp
+    SUDO mkdir -p /usr/local/etc/openvswitch
+fi
+
+# Start ovsdb server
+
+sudo src/ovs/ovs/ovsdb/ovsdb-tool create /usr/local/etc/openvswitch/conf.db /src/ovs/ovs/vswitchd/vswitch.ovsschema
+
+sudo src/ovs/ovs/ovsdb/ovsdb-server --remove=punix:/usr/local/var/run/openvswitch/db.sock --remote=db:Open_vSwitch,Open_vSwitch,manager_options --pidfile=/usr/local/var/run/openvswitch/ovsdb-server.pid --overwrite-pidfile
+
+
+# Configure vSwitch
+sudo src/ovs/ovs/utilities/ovs-vsctl --no-wait set Open_vSwitch . other_config:dpdk-lcore-mask="0x4"
+sudo src/ovs/ovs/utilities/ovs-vsctl --no-wait set Open_vSwitch . other_config:dpdk-socket-mem="1024,0"
+sudo src/ovs/ovs/utilities/ovs-vsctl --no-wait set Open_vSwitch . other_config:dpdk-init=true
+
+# Start vswitch daemon
+
+sudo src/ovs/ovs/vswitchd/ovs-vswitchd --pidfile=/usr/local/var/run/openvswitch/ovs-vswitchd.pid --overwrite-pidfile --log-file/tmp/vswitchd.log
+
+# configure vSwitch.
+sudo src/ovs/ovs/utilities/ovs-vsctl --timeout 10 add-br br0 -- set bridge br0 datapath_type=netdev
+sudo src/ovs/ovs/utilities/ovs-ofctl --timeout 10 -O OpenFlow13 del-flows br0
+
+
+sudo src/ovs/ovs/utilities/ovs-vsctl --timeout 10 set Open_vSwitch . other_config:max-idle=30000
+sudo src/ovs/ovs/utilities/ovs-vsctl --timeout 10 set Open_vSwitch . other_config:pmd-cpu-mask=FO
+
+SUDO src/ovs/ovs/utilities/ovs-vsctl --timeout 10 add-port br0 dpdk0 -- set Interface dpdk0 type=dpdk options:dpdk-devargs=$pic0 
+SUDO src/ovs/ovs/utilities/ovs-vsctl --timeout 10 add-port br0 dpdk1 -- set Interface dpdk1 type=dpdk options:dpdk-devargs=$pic1 
+
+
+# Adding flows
+
