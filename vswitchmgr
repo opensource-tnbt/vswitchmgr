@@ -90,6 +90,12 @@ sudo src/ovs/ovs/utilities/ovs-vsctl --timeout 10 set Open_vSwitch . other_confi
 SUDO src/ovs/ovs/utilities/ovs-vsctl --timeout 10 add-port br0 dpdk0 -- set Interface dpdk0 type=dpdk options:dpdk-devargs=$pic0 
 SUDO src/ovs/ovs/utilities/ovs-vsctl --timeout 10 add-port br0 dpdk1 -- set Interface dpdk1 type=dpdk options:dpdk-devargs=$pic1 
 
+# Finding port number before adding flows.
+# option 1
+sudo src/ovs/ovs/utilities/ovs-ofctl show br0
+sudo src/ovs/ovs/utilities/ovs-vsctl get Interface eno3 ofport
+sudo src/ovs/ovs/utilities/ovs-vsctl -- --columns=name,ofport list Interface eno3
 
 # Adding flows
+sudo src/ovs/ovs/utilities/ovs-ofctl --timeout 10 -O Openflow13 add-flow br0 in_port=1,idle_timeout=0,action=output:2
 
